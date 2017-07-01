@@ -100,21 +100,21 @@ impl Circle {
         2.0 * consts::PI * self.radius
     }
 
-    fn as_glyph(&self, grid_nx: usize, grid_ny: usize) -> Glyph {
-        let cbox_nx = (2.0 * self.radius * (grid_nx as f64)).ceil() as i32;
-        let cbox_ny = (2.0 * self.radius * (grid_ny as f64)).ceil() as i32;
-        let mut cbox_grid = vec![vec![false; cbox_ny as usize]; cbox_nx as usize];
+    fn as_glyph(&self, page_nx: i32, page_ny: i32) -> Glyph {
+        let h_box_nx = (2.0 * self.radius * (page_nx as f64)).ceil() as i32;
+        let h_box_ny = (2.0 * self.radius * (page_ny as f64)).ceil() as i32;
+        let mut grid = vec![vec![false; h_box_ny as usize]; h_box_nx as usize];
 
-        for cell_i in 0..cbox_nx {
-            for cell_j in 0..cbox_ny {
-                let cell_x = (cell_i - cbox_nx / 2) as f64 / (grid_nx as f64);
-                let cell_y = (cell_j - cbox_ny / 2) as f64 / (grid_ny as f64);
+        for cell_i in 0..h_box_nx {
+            for cell_j in 0..h_box_ny {
+                let cell_x = (cell_i - h_box_nx / 2) as f64 / (page_nx as f64);
+                let cell_y = (cell_j - h_box_ny / 2) as f64 / (page_ny as f64);
                 let cell_r_sq = cell_x.powi(2) + cell_y.powi(2);
-                cbox_grid[cell_i as usize][cell_j as usize] = cell_r_sq < self.radius.powi(2);
+                grid[cell_i as usize][cell_j as usize] = cell_r_sq < self.radius.powi(2);
             }
         }
         Glyph {
-            grid: cbox_grid,
+            grid: grid,
         }
     }
 }
@@ -125,21 +125,23 @@ struct Glyph {
 }
 
 impl Glyph {
-    fn to_c_box(self) -> CBox {
-        CBox {
+    fn to_h_box(self, base_line: i32) -> HBox {
+        HBox {
             origins: vec![],
             glyph: self,
+            base_line: base_line,
         }
     }
 }
 
-struct CBox {
+struct HBox {
     origins: Vec<IntPoint>,
     glyph: Glyph,
+    base_line: i32,
 }
 
-impl CBox {
-    fn add_origin(&mut self, x: f64, y: f64, nx: usize, ny: usize) {
+impl HBox {
+    fn add_origin(&mut self, x: f64, y: f64, nx: i32, ny: i32) {
         let origin = IntPoint {
             i: (x * nx as f64).round() as i32,
             j: (y * ny as f64).round() as i32,
@@ -148,19 +150,46 @@ impl CBox {
     }
 }
 
-fn get_force_mag(r_sq: i32) -> f64 {
-    50.0 - (r_sq as f64).sqrt()
+fn get_spring_force_mag(r: f64, r0: f64) -> f64 {
+    r0 - r
 }
 
-fn force(du: &IntPoint) -> RealPoint {
-    let force_mag = get_force_mag(du.mag_sq());
+fn spring_force(du: &IntPoint) -> RealPoint {
+    let force_mag = get_spring_force_mag(du.mag(), 50.0);
     du.to_unit().scale(force_mag)
 }
 
-impl CBox {
+impl HBox {
     fn force_between(&self, o1: usize, o2: usize) -> RealPoint {
-        let du = self.origins[o2].sub(&self.origins[o1]);
-        force(&du)
+        if o1 == o2 {
+            RealPoint {
+                x: 0.0,
+                y: 0.0,
+            }
+        } else if o2 == o1 + 1 {
+            RealPoint {
+                x: get_spring_force_mag((self.origins[o1].i - (self.origins[o2].i + 50)) as f64, 0.0),
+                y: 0.0,
+            }
+        } else if o2 as i32 == (o1 as i32) - 1 {
+            RealPoint {
+                x: get_spring_force_mag((self.origins[o1].i - (self.origins[o2].i - 50)) as f64, 0.0),
+                y: 0.0,
+            }
+        } else {
+            RealPoint {
+                x: 0.0,
+                y: 0.0,
+            }
+        }
+    }
+
+    fn force_line(&self, o1: usize) -> RealPoint {
+        RealPoint {
+            x: 0.0,
+            // y: 0.0,
+            y: get_spring_force_mag((self.origins[o1].j - self.base_line) as f64, 0.0),
+        }
     }
 
     fn pos(&self, o: usize, i: usize, j: usize) -> IntPoint {
@@ -169,18 +198,16 @@ impl CBox {
 
     fn iterate(&mut self, dt: f64) {
         for o1 in 0..self.origins.len() {
-            let mut f12 = RealPoint {x: 0.0, y: 0.0};
+            let mut f1 = RealPoint {x: 0.0, y: 0.0};
             for o2 in 0..self.origins.len() {
-                if o1 == o2 {
-                    continue;
-                }
-                f12.add_inplace(&self.force_between(o1, o2));
+                f1.add_inplace(&self.force_between(o1, o2));
             }
-            self.origins[o1].add_inplace(&f12.scale(dt).round());
+            f1.add_inplace(&self.force_line(o1));
+            self.origins[o1].add_inplace(&f1.scale(dt).round());
         }
     }
 
-    fn to_string(&mut self) -> String {
+    fn to_string(&self) -> String {
         let mut s = String::new();
         s += "glyph_dimens:\n";
         s += &format!("gx,gy\n{},{}\n\n", self.glyph.grid.len(), self.glyph.grid[0].len());
@@ -204,42 +231,24 @@ impl CBox {
 
 }
 
-struct Grid {
-    grid: Vec<Vec<bool>>,
+struct Page {
+    shape: IntPoint,
+    h_boxes: Vec<HBox>,
 }
 
-impl Grid {
-    fn new(nx: usize, ny: usize) -> Grid {
-        Grid {grid: vec![vec![false; ny]; nx]}
-    }
-
-    fn add_cbox(&mut self, cbox: &CBox) {
-        for i in 0..cbox.glyph.grid.len() {
-            for j in 0..cbox.glyph.grid[0].len() {
-                if cbox.glyph.grid[i][j] {
-                    for origin_idx in 0..cbox.origins.len() {
-                        let pos = cbox.pos(origin_idx, i, j);
-                        self.grid[pos.i as usize][pos.j as usize] = true;
-                    }
-                }
-            }
+impl Page {
+    fn new(nx: i32, ny: i32) -> Page {
+        Page {
+            shape: IntPoint {i: nx, j: ny},
+            h_boxes: vec![],
         }
     }
 
-    fn clear(&mut self) {
-        for i in 0..self.grid.len() {
-            for j in 0..self.grid[0].len() {
-                self.grid[i][j] = false;
-            }
-        }
-    }
-
-    fn to_string(&mut self) -> String {
+    fn to_string(&self) -> String {
         let mut s = String::new();
-        for i in 0..self.grid.len() {
-            let strs: Vec<_> = self.grid[i].iter().map(|&e| format!("{}", e as u8)).collect();
-            s += &format!("{}\n", strs.join(","));
-        }
+        s += "grid_dimens:\n";
+        s += &format!("nx,ny\n{},{}\n\n", self.shape.i, self.shape.j);
+        s += &self.h_boxes[0].to_string();
         s
     }
 
@@ -251,28 +260,25 @@ fn main() {
     let nx = 500;
     let ny = 500;
 
+    let mut page = Page::new(nx, ny);
+
     let circ = Circle {
         radius: 0.02,
     };
     let circ_glyph = circ.as_glyph(nx, ny);
-    let mut cbox = circ_glyph.to_c_box();
-    cbox.add_origin(0.4, 0.4, nx, ny);
-    cbox.add_origin(0.6, 0.6, nx, ny);
-    cbox.add_origin(0.2, 0.2, nx, ny);
+    let mut h_box = circ_glyph.to_h_box(200);
+    h_box.add_origin(0.4, 0.4, nx, ny);
+    h_box.add_origin(0.6, 0.6, nx, ny);
+    h_box.add_origin(0.21, 0.23, nx, ny);
+    h_box.add_origin(0.8, 0.8, nx, ny);
 
-    let mut grid = Grid::new(nx, ny);
-    for t in 0..50 {
-        cbox.iterate(0.05);
-        println!("first: ({}, {})", cbox.origins[0].i, cbox.origins[0].j);
+    page.h_boxes.push(h_box);
 
-        let mut f = File::create(format!("dat/out_{0:010}.csv", t)).expect("Could not create file");
-        // grid.clear();
-        // grid.add_cbox(&cbox);
-        // f.write_all(grid.to_string().as_bytes()).expect("Failed to write message");
-        let mut s = String::new();
-        s += "grid_dimens:\n";
-        s += &format!("nx,ny\n{},{}\n\n", nx, ny);
-        s += &cbox.to_string();
-        f.write_all(s.as_bytes()).expect("Failed to write message");
+    for t in 0..200 {
+        page.h_boxes[0].iterate(0.05);
+        if t % 5 == 0 {
+            let mut f = File::create(format!("dat/out_{0:010}.csv", t)).expect("Could not create file");
+            f.write_all(page.to_string().as_bytes()).expect("Failed to write message");            
+        }
     }
 }

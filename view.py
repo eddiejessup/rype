@@ -46,6 +46,7 @@ def parse(f):
 
 file_names = sorted(glob('dat/*.csv'))
 for file_name in file_names:
+    print(file_name)
     f = open(file_name)
     grid_dimens, glyph, glyph_origins = parse(f)
     
@@ -55,7 +56,7 @@ for file_name in file_names:
         grid[glyph_origin[0]:glyph_termin[0], glyph_origin[1]:glyph_termin[1]] += glyph
 
     ax.cla()
-    ax.imshow(grid)
+    ax.imshow(grid.T)
     fig.savefig(file_name.replace('csv', 'png'))
 
 # p = figure(x_range=(0, 1), y_range=(0, 1))
