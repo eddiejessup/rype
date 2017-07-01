@@ -92,13 +92,6 @@ struct Circle {
 }
 
 impl Circle {
-    fn area(&self) -> f64 {
-        consts::PI * self.radius.powi(2)
-    }
-
-    fn perimeter(&self) -> f64 {
-        2.0 * consts::PI * self.radius
-    }
 
     fn as_glyph(&self, page_nx: i32, page_ny: i32) -> Glyph {
         let h_box_nx = (2.0 * self.radius * (page_nx as f64)).ceil() as i32;
@@ -125,7 +118,7 @@ struct Glyph {
 }
 
 impl Glyph {
-    fn to_h_box(self, base_line: i32) -> HBox {
+    fn to_h_box(self, base_line: f64) -> HBox {
         HBox {
             origins: vec![],
             glyph: self,
@@ -135,32 +128,32 @@ impl Glyph {
 }
 
 struct HBox {
-    origins: Vec<IntPoint>,
+    origins: Vec<RealPoint>,
     glyph: Glyph,
-    base_line: i32,
+    base_line: f64,
 }
 
 impl HBox {
-    fn add_origin(&mut self, x: f64, y: f64, nx: i32, ny: i32) {
-        let origin = IntPoint {
-            i: (x * nx as f64).round() as i32,
-            j: (y * ny as f64).round() as i32,
+    fn add_origin(&mut self, x: f64, y: f64) {
+        let origin = RealPoint {
+            x: x,
+            y: y,
         };
         self.origins.push(origin);
     }
 }
 
-fn get_spring_force_mag(r: f64, r0: f64) -> f64 {
-    r0 - r
+fn get_spring_force_mag(r: f64, k: f64) -> f64 {
+    k * r
 }
 
-fn spring_force(du: &IntPoint) -> RealPoint {
-    let force_mag = get_spring_force_mag(du.mag(), 50.0);
-    du.to_unit().scale(force_mag)
-}
+const R_GLYPH: f64 = 0.1;
+const K_GLYPH: f64 = 0.1;
+const K_LINE: f64 = 0.05;
+const R_LINE: f64 = 0.4;
 
 impl HBox {
-    fn force_between(&self, o1: usize, o2: usize) -> RealPoint {
+    fn force_between(&self, o1: i32, o2: i32) -> RealPoint {
         if o1 == o2 {
             RealPoint {
                 x: 0.0,
@@ -168,12 +161,12 @@ impl HBox {
             }
         } else if o2 == o1 + 1 {
             RealPoint {
-                x: get_spring_force_mag((self.origins[o1].i - (self.origins[o2].i + 50)) as f64, 0.0),
+                x: -get_spring_force_mag(self.origins[o1 as usize].x - (self.origins[o2 as usize].x + R_GLYPH), K_GLYPH),
                 y: 0.0,
             }
-        } else if o2 as i32 == (o1 as i32) - 1 {
+        } else if o2 == o1 - 1 {
             RealPoint {
-                x: get_spring_force_mag((self.origins[o1].i - (self.origins[o2].i - 50)) as f64, 0.0),
+                x: -get_spring_force_mag(self.origins[o1 as usize].x - (self.origins[o2 as usize].x - R_GLYPH), K_GLYPH),
                 y: 0.0,
             }
         } else {
@@ -187,23 +180,19 @@ impl HBox {
     fn force_line(&self, o1: usize) -> RealPoint {
         RealPoint {
             x: 0.0,
+            y: -get_spring_force_mag(self.origins[o1].y - self.base_line, K_LINE),
             // y: 0.0,
-            y: get_spring_force_mag((self.origins[o1].j - self.base_line) as f64, 0.0),
         }
-    }
-
-    fn pos(&self, o: usize, i: usize, j: usize) -> IntPoint {
-        IntPoint {i: self.origins[o].i + i as i32, j: self.origins[o].j + j as i32}
     }
 
     fn iterate(&mut self, dt: f64) {
         for o1 in 0..self.origins.len() {
             let mut f1 = RealPoint {x: 0.0, y: 0.0};
             for o2 in 0..self.origins.len() {
-                f1.add_inplace(&self.force_between(o1, o2));
+                f1.add_inplace(&self.force_between(o1 as i32, o2 as i32));
             }
             f1.add_inplace(&self.force_line(o1));
-            self.origins[o1].add_inplace(&f1.scale(dt).round());
+            self.origins[o1].add_inplace(&f1.scale(dt));
         }
     }
 
@@ -222,9 +211,9 @@ impl HBox {
         s += &format!("{}\n", self.origins.len());
 
         s += "\nglyph_instance_origins:\n";
-        s += "i,j\n";
+        s += "x,y\n";
         for i in 0..self.origins.len() {
-            s += &format!("{},{}\n", self.origins[i].i, self.origins[i].j);
+            s += &format!("{},{}\n", self.origins[i].x, self.origins[i].y);
         }        
         s
     }
@@ -266,19 +255,20 @@ fn main() {
         radius: 0.02,
     };
     let circ_glyph = circ.as_glyph(nx, ny);
-    let mut h_box = circ_glyph.to_h_box(200);
-    h_box.add_origin(0.4, 0.4, nx, ny);
-    h_box.add_origin(0.6, 0.6, nx, ny);
-    h_box.add_origin(0.21, 0.23, nx, ny);
-    h_box.add_origin(0.8, 0.8, nx, ny);
+    let mut h_box = circ_glyph.to_h_box(R_LINE);
+    h_box.add_origin(0.11, 0.23);
+    h_box.add_origin(0.67, 0.6);
+    h_box.add_origin(0.31, 0.4);
+    h_box.add_origin(0.77, 0.8);
 
     page.h_boxes.push(h_box);
 
-    for t in 0..200 {
-        page.h_boxes[0].iterate(0.05);
-        if t % 5 == 0 {
+    for t in 0..10000 {
+        page.h_boxes[0].iterate(0.01);
+        if t % 50 == 0 {
+            println!("hihi");
             let mut f = File::create(format!("dat/out_{0:010}.csv", t)).expect("Could not create file");
-            f.write_all(page.to_string().as_bytes()).expect("Failed to write message");            
+            f.write_all(page.to_string().as_bytes()).expect("Failed to write message");                        
         }
     }
 }

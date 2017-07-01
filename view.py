@@ -39,9 +39,12 @@ def parse(f):
     line = f.readline()
     assert line == 'glyph_instance_origins:\n', line
     line = f.readline()
-    assert line == 'i,j\n', line
-    glyph_origins_lst = [list(map(int, f.readline().split(','))) for _ in range(nr_glyphs)]
-    glyph_origins = np.array(glyph_origins_lst, dtype=np.int)
+    assert line == 'x,y\n', line
+    glyph_origins_lst = [
+        list(map(float, f.readline().split(',')))
+        for _ in range(nr_glyphs)
+    ]
+    glyph_origins = np.array(glyph_origins_lst, dtype=np.float)
     return grid_dimens, glyph, glyph_origins
 
 file_names = sorted(glob('dat/*.csv'))
@@ -49,11 +52,13 @@ for file_name in file_names:
     print(file_name)
     f = open(file_name)
     grid_dimens, glyph, glyph_origins = parse(f)
-    
+
+    glyph_origins_i = (glyph_origins * grid_dimens).round().astype(np.int)
+
     grid = np.zeros(grid_dimens, dtype=np.bool)
-    for glyph_origin in glyph_origins:
-        glyph_termin = glyph_origin + glyph.shape
-        grid[glyph_origin[0]:glyph_termin[0], glyph_origin[1]:glyph_termin[1]] += glyph
+    for glyph_origin_i in glyph_origins_i:
+        glyph_termin_i = glyph_origin_i + glyph.shape
+        grid[glyph_origin_i[0]:glyph_termin_i[0], glyph_origin_i[1]:glyph_termin_i[1]] += glyph
 
     ax.cla()
     ax.imshow(grid.T)
