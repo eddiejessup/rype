@@ -1,0 +1,6 @@
+[package]
+name = "rype"
+version = "0.1.0"
+authors = ["Elliot Marsden <elliot.marsden@gmail.com>"]
+
+[dependencies]
