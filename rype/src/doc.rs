@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ::utils::{IntPoint, RealPoint};
+use ::utils::{Point};
 
 pub struct Glyph {
     grid: Vec<Vec<bool>>,
@@ -28,7 +28,7 @@ impl Glyph {
 
 pub struct CBox {
     glyph_name: String,
-    origin: RealPoint,
+    origin: Point<f64>,
 }
 
 pub struct HBox {
@@ -46,7 +46,7 @@ fn get_spring_force_mag(r: f64, k: f64) -> f64 {
 impl HBox {
     pub fn iterate(&mut self, dt: f64) {
         for o1 in 0..self.c_boxes.len() {
-            let mut f1 = RealPoint {x: 0.0, y: 0.0};
+            let mut f1 = Point {x: 0.0, y: 0.0};
             for o2 in 0..self.c_boxes.len() {
                 f1.add_inplace(&self.force_between(o1 as i32, o2 as i32));
             }
@@ -69,39 +69,36 @@ impl HBox {
     }
 
     pub fn add_c_box(&mut self, glyph_name: String, x: f64, y: f64) {
-        let origin = RealPoint {
-            x: x,
-            y: y,
-        };
+        let origin = Point { x: x, y: y };
         self.c_boxes.push(CBox {glyph_name: glyph_name, origin: origin});
     }
 
-    fn force_between(&self, o1: i32, o2: i32) -> RealPoint {
+    fn force_between(&self, o1: i32, o2: i32) -> Point<f64> {
         if o1 == o2 {
-            RealPoint {
+            Point {
                 x: 0.0,
                 y: 0.0,
             }
         } else if o2 == o1 + 1 {
-            RealPoint {
+            Point {
                 x: get_spring_force_mag(self.c_boxes[o1 as usize].origin.x - (self.c_boxes[o2 as usize].origin.x + self.c_box_sep), self.c_box_k),
                 y: 0.0,
             }
         } else if o2 == o1 - 1 {
-            RealPoint {
+            Point {
                 x: get_spring_force_mag(self.c_boxes[o1 as usize].origin.x - (self.c_boxes[o2 as usize].origin.x - self.c_box_sep), self.c_box_k),
                 y: 0.0,
             }
         } else {
-            RealPoint {
+            Point {
                 x: 0.0,
                 y: 0.0,
             }
         }
     }
 
-    fn force_line(&self, o1: usize) -> RealPoint {
-        RealPoint {
+    fn force_line(&self, o1: usize) -> Point<f64> {
+        Point {
             x: 0.0,
             y: get_spring_force_mag(self.c_boxes[o1].origin.y - self.base_line, self.base_line_k),
         }
@@ -109,7 +106,7 @@ impl HBox {
 }
 
 pub struct Page {
-    shape: IntPoint,
+    shape: Point<i32>,
     pub h_boxes: Vec<HBox>,
     pub glyphs: HashMap<String,Glyph>,
 }
@@ -117,7 +114,7 @@ pub struct Page {
 impl Page {
     pub fn new(nx: i32, ny: i32) -> Page {
         Page {
-            shape: IntPoint {i: nx, j: ny},
+            shape: Point::<i32> {x: nx, y: ny},
             h_boxes: vec![],
             glyphs: HashMap::new(),
         }
@@ -132,7 +129,7 @@ impl Page {
     pub fn to_string(&self) -> String {
         let mut s = String::new();
         s += "grid_dimens:\n";
-        s += &format!("nx,ny\n{},{}\n", self.shape.i, self.shape.j);
+        s += &format!("nx,ny\n{},{}\n", self.shape.x, self.shape.y);
 
         s += "\nnr_glyphs:\n";
         s += &format!("{}\n\n", self.glyphs.len());
